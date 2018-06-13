@@ -1,0 +1,333 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+library(readr)
+house <- read_csv("kc_house_data.csv")
+```
+
+```{r}
+# summary statistics
+head(house)
+summary(house)
+s <- summary(house)
+
+```
+
+```{r}
+library(lubridate)
+# recode renovation to binary field
+house$renovation_yn <- ""
+house$renovation_yn[house$yr_renovated>0] <- 1
+house$renovation_yn[house$yr_renovated==0] <- 0
+
+# factor zipcode
+house$zipcode2 <- factor(house$zipcode)
+
+# change date
+house$date2 <- ymd(house$date) 
+house$year <- factor(year(house$date2))
+house$month <- factor(month(house$date2))
+```
+
+```{r}
+# plots
+library(ggplot2)
+p <- ggplot(house,aes(price))
+# p <- p + geom_histogram()
+p <- p + geom_density()
+require(scales)
+p <- p + scale_x_continuous(labels = comma)
+p <- p + scale_y_continuous(labels = comma);p
+```
+
+```{r}
+library(ggplot2)
+p2 <- ggplot(house,aes(x="", y=price))
+p2 <- p2 + geom_boxplot() + coord_flip() + scale_y_continuous(labels = comma);p2
+
+print("price descriptives")
+print(s[,3])
+```
+
+```{r}
+library(ggplot2)
+p3 <- ggplot(house,aes(renovation_yn))
+p3 <- p3 + geom_bar();p3
+```
+```{r}
+h_n <- house[,-c(1,2,17,22,23,25,24,25,26)]
+cor(h_n)
+```
+
+```{r}
+library(ggplot2)
+p4 <- ggplot(house,aes(x=sqft_living,y=price)) + geom_point() + geom_smooth(method=lm);p4
+p5 <- ggplot(house,aes(x=sqft_above,y=price)) + geom_point() + geom_smooth(method=lm);p5
+p6 <- ggplot(house,aes(x=sqft_living15,y=price)) + geom_point() + geom_smooth(method=lm);p6
+p7 <- ggplot(house,aes(x=sqft_basement,y=price)) + geom_point() + geom_smooth(method=lm);p7
+p8 <- ggplot(house,aes(x=sqft_basement,y=price)) + geom_point() + geom_smooth(method=lm);p8
+
+p9 <- ggplot(house,aes(x=renovation_yn,y=price,group=renovation_yn)) + geom_boxplot(aes(fill=..x..)) + scale_fill_gradient(low="red",high="blue");p9
+p10 <- ggplot(house,aes(x=waterfront,y=price,group=waterfront)) + geom_boxplot(aes(fill=..x..)) + scale_fill_gradient(low="red",high="blue");p10
+p11 <- ggplot(house,aes(x=view,y=price,group=view)) + geom_boxplot(aes(fill=..x..)) + scale_fill_gradient(low="red",high="blue");p11
+p12 <- ggplot(house,aes(x=grade,y=price,group=grade)) + geom_boxplot(aes(fill=..x..)) + scale_fill_gradient(low="red",high="blue");p12
+
+p13 <- ggplot(house,aes(renovation_yn)) + geom_bar(aes(fill=..x..)) + scale_fill_gradient(low="red",high="blue");p13
+p14 <- ggplot(house,aes(waterfront)) + geom_bar(aes(fill=..x..)) + scale_fill_gradient(low="red",high="blue");p14
+p15 <- ggplot(house,aes(view)) + geom_bar(aes(fill=..x..)) + scale_fill_gradient(low="red",high="blue");p15
+p16 <- ggplot(house,aes(grade)) + geom_bar(aes(fill=..x..)) + scale_fill_gradient(low="red",high="blue");p16
+```
+
+```{r}
+# add a polynomial for grade
+house$grade_2 <- (house$grade)^2
+```
+
+```{r}
+# break into train and test set (75/25)
+sample_size <- floor(0.75*nrow(house))
+set.seed(1)
+train_ind <- sample(seq_len(nrow(house)),size=sample_size)
+
+train <- house[train_ind,]
+test <- house[-train_ind,]
+
+cat(print("normal dataset is"), nrow(house),print(" rows"));
+cat(print("training dataset is"), nrow(train),print(" rows"));
+cat(print("testing dataset is "),nrow(test),print(" rows"))
+```
+```{r}
+# linear regression
+y1 <- train[,c(3)]
+x1 <- train[,-c(1,2,3,13,16,17,23,25,27)]
+df <- data.frame(y1,x1)
+
+m1 <- lm(formula = df)
+summary(m1)
+
+# predict
+y2 <- test[,c(3)]
+x2 <- test[,-c(1,2,3,13,16,17,23,25,27)]
+df1 <- data.frame(y2,x2)
+pd <- predict(m1,df1)
+
+# RMSE
+mse_lm <- sum(sqrt((pd - y2)^2))/nrow(y2)
+
+cat(print("Mean Square Error = "), mse_lm)
+```
+
+```{r}
+# ridge and lasso
+library(glmnet)
+lambda <- 10^seq(10, -2, length = 100)
+
+# ridge
+# x_m = as.matrix(df[,-c(1)])
+# y_m = as.numeric(unlist(df[,c(1)]))
+x_m <- model.matrix(~.,df[,-c(1)])
+y_m = df[,c(1)]
+# ridge
+ridge_mod <- glmnet(x=x_m,y=y_m,alpha=0,lambda = lambda)
+cv_out <- cv.glmnet(x_m,y_m, alpha = 0)
+bestlam <- cv_out$lambda.min
+
+x_m2 <- model.matrix(~.,df1[,-c(1)])
+ridge_pred <- predict(ridge_mod,s=bestlam,newx=x_m2)
+
+mse_ri <- sum(sqrt((ridge_pred - y2)^2))/nrow(y2)
+cat(print("Ridge regression Mean Square Error = "), mse_ri)
+
+# lasso
+lasso_mod <- glmnet(x=x_m,y=y_m,alpha=1,lambda = lambda)
+cv_out <- cv.glmnet(x_m,y_m, alpha = 1)
+bestlam <- cv_out$lambda.min
+
+x_m2 <- model.matrix(~.,df1[,-c(1)])
+lasso_pred <- predict(lasso_mod,s=bestlam,newx=x_m2)
+
+mse_lasso <- sum(sqrt((lasso_pred - y2)^2))/nrow(y2)
+cat(print("Lasso Mean Square Error = "), mse_lasso)
+```
+
+```{r}
+# ensemble
+# equal weight
+en_pred = (pd*7 + ridge_pred*1.5 + lasso_pred*1.5)/10
+mse <- sum((en_pred-y2)^2)/nrow(test)
+cat(print("Ensemble Mean Square Error = "), mse)
+```
+
+```{r}
+# random forests
+# install.packages("randomForest")
+library(randomForest)
+set.seed(1)
+rf <- randomForest(price ~ .,data=df)
+rf
+plot(rf)
+```
+```{r}
+# predict randomforest
+pred_rf <- predict(rf,x2)
+mse_rf <- sum(sqrt((pred_rf - y2)^2))/nrow(y2)
+
+cat(print("Random Forest Mean Square Error = "), mse_rf)
+VI_F=importance(rf);VI_F
+varImpPlot(rf,type=2)
+```
+
+```{r}
+# xgboost
+# install.packages("xgboost")
+library(xgboost)
+
+# data(df,package='xgboost')
+# data(df1,package='xgboost')
+
+train_xgb <- data.matrix(df)
+test_xgb <- data.matrix(df1)
+
+
+
+xgb_m <- xgboost(data=train_xgb[,-c(1)],
+                 label=train_xgb[,c(1)],
+                 max_depth = 3, eta = 1, 
+                 nthread = 2, nrounds = 300,
+                 objective="reg:linear",
+                 verbose = 1,
+                 booster = "dart")
+
+pred_xg <- predict(xgb_m,test_xgb[,-c(1)])
+
+mse_xgb <- sum(sqrt((pred_xg - test_xgb[,c(1)])^2))/nrow(y2)
+
+cat(print("xgboost Mean Square Error = "), mse_xgb)
+```
+
+```{r}
+pred_xg <- predict(xgb_m,test_xgb[,-c(1)])
+
+mse_xgb <- sum(sqrt((pred_xg - test_xgb[,c(1)])^2))/nrow(y2)
+
+cat(print("xgboost Mean Square Error = "), mse_xgb)
+```
+
+```{r}
+library(ggplot2)
+pred_all <- cbind(y2,pred_rf,pred_xg)
+p_rf <- ggplot(data=pred_all,aes(x=pred_rf,y=y2)) + geom_point() + geom_smooth(method=lm) + scale_x_continuous(labels = comma) + scale_y_continuous(labels = comma);p_rf
+
+p_xgb <- ggplot(data=pred_all,aes(x=pred_xg,y=y2)) + geom_point() + geom_smooth(method=lm) + scale_x_continuous(labels = comma) + scale_y_continuous(labels = comma);p_xgb
+```
+
+```{r}
+# ensemble
+# equal weight
+en_pred = (pred_all[,c(2)] + pred_all[,c(3)])/2
+mse_pred <- sum(sqrt((en_pred - y2)^2))/nrow(y2)
+cat(print("Ensemble Mean Square Error = "), mse_pred);
+
+en_pred = (pred_all[,c(2)]*5 + pred_all[,c(3)])/6
+mse_pred <- sum(sqrt((en_pred - y2)^2))/nrow(y2)
+cat(print("Ensemble Mean Square Error = "), mse_pred);
+
+en_pred = (pred_all[,c(2)] + pred_all[,c(3)]*5)/6
+mse_pred <- sum(sqrt((en_pred - y2)^2))/nrow(y2)
+cat(print("Ensemble Mean Square Error = "), mse_pred);
+```
+
+```{r}
+en_pred = (pred_all[,c(2)]*6 + pred_all[,c(3)]*3)/9
+mse_pred <- sum(sqrt((en_pred - y2)^2))/nrow(y2)
+cat(print("Ensemble Mean Square Error = "), mse_pred);
+```
+
+```{r}
+pred_all2 <- cbind(y2,en_pred)
+
+p_en <- ggplot(data=pred_all2,aes(x=en_pred,y=y2)) + geom_point() + geom_smooth(method=lm) + scale_x_continuous(labels = comma) + scale_y_continuous(labels = comma);p_en
+```
+
+```{r}
+# xgboost with zipcode and grade factor
+
+# train
+y1 <- train[,c(3)]
+x1 <- train[,-c(1,2,3,13,16,17,25,27)]
+df <- data.frame(y1,x1)
+# df$grade <- factor(df$grade)
+
+# test
+y2 <- test[,c(3)]
+x2 <- test[,-c(1,2,3,13,16,17,25,27)]
+df1 <- data.frame(y2,x2)
+# df1$grade <- factor(df1$grade)
+
+train_xgb <- data.matrix(df)
+test_xgb <- data.matrix(df1)
+
+xgb_m <- xgboost(data=train_xgb[,-c(1)],
+                 label=train_xgb[,c(1)],
+                 max_depth = 3, eta = 1, 
+                 nthread = 2, nrounds = 300,
+                 objective="reg:linear",
+                 verbose = 1 ,
+                 booster = "dart")
+
+pred_xg <- predict(xgb_m,test_xgb[,-c(1)])
+
+mse_xgb <- sum(sqrt((pred_xg - test_xgb[,c(1)])^2))/nrow(y2)
+
+cat(print("xgboost Mean Square Error = "), mse_xgb)
+
+```
+
+```{r}
+# random forests
+# install.packages("randomForest")
+library(randomForest)
+
+# train
+y1 <- train[,c(3)]
+x1 <- train[,-c(1,2,3,13,16,17,23,25,27)]
+df <- data.frame(y1,x1)
+# df$grade <- factor(df$grade)
+
+# test
+y2 <- test[,c(3)]
+x2 <- test[,-c(1,2,3,13,16,17,23,25,27)]
+df1 <- data.frame(y2,x2)
+
+set.seed(1)
+rf <- randomForest(price ~ .,data=df,
+                   ntree=250,
+                   nodesize = 5,
+                   mtry=10)
+rf
+plot(rf)
+# predict randomforest
+pred_rf <- predict(rf,x2)
+mse_rf <- sum(sqrt((pred_rf - y2)^2))/nrow(y2)
+
+cat(print("Random Forest Mean Square Error = "), mse_rf)
+VI_F=importance(rf);VI_F
+varImpPlot(rf,type=2)
+```
+
+```{r}
+pred_all <- cbind(y2,pred_rf,pred_xg)
+
+en_pred = (pred_all[,c(2)] + pred_all[,c(3)])/2
+mse_pred <- sum(sqrt((en_pred - y2)^2))/nrow(y2)
+cat(print("Ensemble Mean Square Error = "), mse_pred);
+
+en_pred = (pred_all[,c(2)]*2 + pred_all[,c(3)])/3
+mse_pred <- sum(sqrt((en_pred - y2)^2))/nrow(y2)
+cat(print("Ensemble Mean Square Error = "), mse_pred);
+```
+
